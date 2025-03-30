@@ -1,0 +1,37 @@
+# Ignorar el directorio de dependencias de Composer
+/vendor/
+
+# Ignorar archivos de configuración sensibles
+.env
+config/secrets.php
+
+# Ignorar logs
+*.log
+logs/
+
+# Ignorar archivos temporales y de caché
+*.cache
+*.tmp
+temp/
+tmp/
+
+# Ignorar archivos generados por el sistema operativo
+.DS_Store
+Thumbs.db
+
+# Ignorar archivos de IDEs y editores
+.idea/
+*.sublime-workspace
+*.sublime-project
+.vscode/
+
+# Ignorar archivos de Composer generados
+composer.lock
+
+# Ignorar directorios de pruebas o builds (si los añades después)
+build/
+dist/
+tests/coverage/
+
+# Ignorar archivos de depuración específicos de PHP
+php_errors.log
