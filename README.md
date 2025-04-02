@@ -140,7 +140,7 @@ form2mail-php/
 │       ├── AuthMiddleware.php  # Autenticación API
 │       └── JsonValidationMiddleware.php  # Validación JSON
 ├── vendor/             # Dependencias
-├── .env                # Variables de entorno
+├── example.env         # Ejemplo de archivo de Variables. Puedes cambiarlo y renonbrarlo a '.env'
 ├── composer.json       # Configuración de Composer
 └── README.md           # Documentación
 ```
