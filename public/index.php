@@ -1,9 +1,17 @@
 <?php
-use Slim\Factory\AppFactory;
+use Dotenv\Dotenv;
 use Form2Mail\Controllers\MailController;
+use Form2Mail\Controllers\RootController;
+use Form2Mail\Middleware\JsonValidationMiddleware;
+use Form2Mail\Middleware\AuthMiddleware;
+use Form2Mail\Services\MailService;
+use Form2Mail\Services\ValidationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use Dotenv\Dotenv;
+use Slim\Exception\HttpMethodNotAllowedException;
+use Slim\Exception\HttpNotFoundException;
+use Slim\Factory\AppFactory;
+use DI\Container;
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -17,77 +25,71 @@ try {
     die("Error: No se encontraron las variables de entorno requeridas. Verifica el archivo .env: " . $e->getMessage());
 }
 
+// Crear el contenedor manualmente
+$container = new Container();
+
+// Configurar las dependencias en el contenedor
+$container->set('MailService', function () {
+    return new MailService();
+});
+$container->set('ValidationService', function () {
+    return new ValidationService();
+});
+$container->set(MailController::class, function ($container) {
+    return new MailController(
+        $container->get('MailService'),
+        $container->get('ValidationService')
+    );
+});
+
+// AppFactory
+AppFactory::setContainer($container);
 $app = AppFactory::create();
 
-// Middleware para validar Content-Type y formato JSON
-$app->add(function (Request $request, $handler): Response {
-    // Verificar si el método es POST (solo aplicamos esta validación a /api/send)
-    if ($request->getMethod() === 'POST') {
-        $contentType = $request->getHeaderLine('Content-Type');
+// Configura middlewares
+$errorMiddleware = $app->addErrorMiddleware(true, true, true);
 
-        // Verificar que el Content-Type sea application/json
-        if (stripos($contentType, 'application/json') === false) {
-            $response = new \Slim\Psr7\Response();
-            $response->getBody()->write(json_encode([
-                'error' => 'El encabezado Content-Type debe ser application/json'
-            ]));
-            return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
-        }
-
-        // Obtener el cuerpo crudo de la solicitud
-        $body = $request->getBody()->getContents();
-
-        // Verificar si el cuerpo está vacío o no es un JSON válido
-        if (empty($body) || json_decode($body) === null && json_last_error() !== JSON_ERROR_NONE) {
-            $response = new \Slim\Psr7\Response();
-            $response->getBody()->write(json_encode([
-                'error' => 'El cuerpo de la solicitud debe ser un JSON válido'
-            ]));
-            return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
-        }
-
-        // Restaurar el cuerpo para que el siguiente middleware lo use
-        $request->getBody()->rewind();
+$errorMiddleware->setErrorHandler(
+    HttpNotFoundException::class,
+    function (Request $request, Throwable $exception, bool $displayErrorDetails, bool $logErrors, bool $logErrorDetails) use ($app) {
+        $response = $app->getResponseFactory()->createResponse();
+        $response->getBody()->write(json_encode(['error' => 'Ruta no encontrada']));
+        return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
     }
+);
 
-    return $handler->handle($request);
-});
+$errorMiddleware->setErrorHandler(
+    HttpMethodNotAllowedException::class,
+    function (Request $request, Throwable $exception, bool $displayErrorDetails, bool $logErrors, bool $logErrorDetails) use ($app) {
+        $response = $app->getResponseFactory()->createResponse();
+        $response->getBody()->write(json_encode(['error' => 'Método no permitido']));
+        return $response->withStatus(405)->withHeader('Content-Type', 'application/json');
+    }
+);
 
+$app->add(JsonValidationMiddleware::class);
+$app->add(AuthMiddleware::class);
 $app->addBodyParsingMiddleware();
-
-// Middleware de autenticación API
-$app->add(function (Request $request, $handler): Response {
-    $apiKey = $request->getHeaderLine('X-API-KEY');
-    $validKey = $_ENV['API_KEY'];
-    if ($apiKey !== $validKey) {
-        $response = new \Slim\Psr7\Response();
-        $response->getBody()->write(json_encode(['error' => 'No autorizado']));
-        return $response->withStatus(401)->withHeader('Content-Type', 'application/json');
-    }
-    return $handler->handle($request);
-});
 
 // Middleware para CORS
 $app->add(function (Request $request, $handler): Response {
     $response = $handler->handle($request);
+    $allowedOrigins = explode(',', $_ENV['CORS_ALLOWED_ORIGINS']);
+    $origin = $request->getHeaderLine('Origin');
+
+    if (in_array($origin, $allowedOrigins)) { 
+        $response = $response->withHeader('Access-Control-Allow-Origin', $origin);
+    } else {
+        $response = $response->withHeader('Access-Control-Allow-Origin', '');
+    }
+
     return $response
-        ->withHeader('Access-Control-Allow-Origin', '*')
         ->withHeader('Access-Control-Allow-Headers', 'X-API-KEY, Content-Type')
         ->withHeader('Access-Control-Allow-Methods', 'POST');
 });
 
-// Ruta principal
-$app->get('/', function (Request $request, Response $response) {
-    $response->getBody()->write(json_encode([
-        'message' => 'Bienvenido a Form2Mail API. Usa POST /api/send para enviar correos.',
-        'documentation' => 'Ver README.md para más detalles.'
-    ]));
-    return $response->withHeader('Content-Type', 'application/json');
-});
-// Ruta envío de correo
+// Rutas
+$app->get('/', [RootController::class, 'index']);
 $app->post('/api/send', [MailController::class, 'sendEmail']);
-
-// Manejo de errores global
-$app->addErrorMiddleware(true, true, true);
 
 $app->run();
